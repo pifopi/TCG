@@ -1,7 +1,8 @@
 #include <array>
 #include <cassert>
-
+#include <format>
 #include <map>
+#include <numeric>
 #include <random>
 
 #pragma warning(push)
@@ -39,7 +40,18 @@ enum class Rarity
 using RateByRarity = std::map<Rarity, double>;
 using RateByCardNumberAndRarity = std::map<CardNumber, RateByRarity>;
 
-double parsePercentage(std::string percentStr)
+using CardCountByRarity = std::map<Rarity, uint16_t>;
+using CardCountByDeckAndRarity = std::map<Deck, CardCountByRarity>;
+
+struct Card
+{
+    Rarity rarity;
+    uint16_t number;
+};
+
+using Booster = std::array<Card, 5>;
+
+double parsePercentage(std::string&& percentStr)
 {
     percentStr.erase(std::remove(percentStr.begin(), percentStr.end(), '%'), percentStr.end());
     return std::stod(percentStr);
@@ -65,9 +77,6 @@ RateByCardNumberAndRarity readRateByCardNumberAndRarity()
     return rateByCardNumberAndRarity;
 }
 
-using CardCountByRarity = std::map<Rarity, uint16_t>;
-using CardCountByDeckAndRarity = std::map<Deck, CardCountByRarity>;
-
 CardCountByDeckAndRarity readCardCountByDeckAndRarity()
 {
     CardCountByDeckAndRarity cardCountByDeckAndRarity{};
@@ -83,14 +92,6 @@ CardCountByDeckAndRarity readCardCountByDeckAndRarity()
     }
     return cardCountByDeckAndRarity;
 }
-
-struct Card
-{
-    Rarity rarity;
-    uint16_t number;
-};
-
-using Booster = std::array<Card, 5>;
 
 class RandomCardGenerator
 {
@@ -178,43 +179,107 @@ private:
 };
 
 #define DEBUG 1
-int main()
+
+#if DEBUG
+std::string AsString(Rarity rarity)
 {
+    switch (rarity)
+    {
+    case Rarity::Diamond_1: return "1 Diamond";
+    case Rarity::Diamond_2: return "2 Diamond";
+    case Rarity::Diamond_3: return "3 Diamond";
+    case Rarity::Diamond_4: return "4 Diamond";
+    case Rarity::Star_1: return "1 Star";
+    case Rarity::Star_2: return "2 Star";
+    case Rarity::Star_3: return "3 Star";
+    case Rarity::Crown: return "Crown";
+    }
+    return "Invalid";
+}
+
+void print(const std::map<Rarity, uint32_t>& computedProbabilities)
+{
+    uint32_t sum = std::accumulate(begin(computedProbabilities), end(computedProbabilities), 0,
+        [](uint32_t sum, const std::map<Rarity, uint32_t>::value_type& item)
+        {
+            return sum + item.second;
+        });
+
+    for (auto& [key, val] : computedProbabilities)
+    {
+        double percentage = 100;
+        percentage *= val;
+        percentage /= sum;
+        std::cout << std::format("\t{}: {} ({}%)", AsString(key), val, percentage) << std::endl;
+    }
+}
+#endif
+
+int main(int argc, char** argv)
+{
+    if (argc != 3)
+    {
+        std::cout << "Two parameters are necessary (in this order) :" << std::endl;
+        std::cout << " - The first one being the number of experiments to do (X)" << std::endl;
+        std::cout << " - The second one being the number of boosters to draw in one experiment (Y)" << std::endl;
+        std::cout << "The program will then repeat X times the experiment. The experiment consist of draws of Charizard, Mewtwo and Pikachu boosters (Y boosters each). It will then tell how many times it got the 226 base cards once / twice out of the Y experiment." << std::endl;
+        return 0;
+    }
+
     RateByCardNumberAndRarity rateByCardNumberAndRarity = readRateByCardNumberAndRarity();
     CardCountByDeckAndRarity cardCountByDeckAndRarity = readCardCountByDeckAndRarity();
     RandomCardGenerator randomCardGenerator(rateByCardNumberAndRarity, cardCountByDeckAndRarity);
-    std::vector<Booster> boosters{};
-    for (size_t i = 0; i < 1000000; ++i)
+
+    unsigned long experimentNumber = std::stoul(argv[1]);
+    unsigned long boosterNumber = std::stoul(argv[2]);
+
+#if DEBUG
+    std::map<CardNumber, std::map<Rarity, uint32_t>> computedProbabilities{};
+    for (CardNumber cardNumber : {CardNumber::OneToThird, CardNumber::Fourth, CardNumber::Fifth})
     {
-        boosters.push_back(randomCardGenerator.getRandomBooster(Deck::Mewtwo));
+        computedProbabilities.insert(std::make_pair(cardNumber, std::map<Rarity, uint32_t>{}));
+    }
+#endif
+    
+    std::cout << std::format("Generating {} of draws of Charizard, Mewtwo and Pikachu boosters ({} boosters each)", experimentNumber, boosterNumber) << std::endl;
+
+    for (unsigned long x = 0; x < experimentNumber; ++x)
+    {
+        std::vector<Booster> boosters{};
+        boosters.reserve(boosterNumber);
+        for (unsigned long y = 0; y < boosterNumber; ++y)
+        {
+            boosters.push_back(randomCardGenerator.getRandomBooster(Deck::Charizard));
+            boosters.push_back(randomCardGenerator.getRandomBooster(Deck::Mewtwo));
+            boosters.push_back(randomCardGenerator.getRandomBooster(Deck::Pikachu));
+        }
+
+        // TODO need to check if it got all card once / twice
+#if DEBUG
+        for (const Booster& booster : boosters)
+        {
+            computedProbabilities[CardNumber::OneToThird][booster[0].rarity]++;
+            computedProbabilities[CardNumber::OneToThird][booster[1].rarity]++;
+            computedProbabilities[CardNumber::OneToThird][booster[2].rarity]++;
+
+            computedProbabilities[CardNumber::Fourth][booster[3].rarity]++;
+
+            computedProbabilities[CardNumber::Fifth][booster[4].rarity]++;
+        }
+#endif
     }
 
 #if DEBUG
-    {
-        std::map<Rarity, uint32_t> computedProbabilities{};
-        for (const Booster& booster : boosters)
-        {
-            computedProbabilities[booster[0].rarity]++;
-            computedProbabilities[booster[1].rarity]++;
-            computedProbabilities[booster[2].rarity]++;
-        }
-    }
+    std::cout << std::endl << std::format("Generated {} cards in total, with such repartition:", experimentNumber * boosterNumber * 5) << std::endl;
 
-    {
-        std::map<Rarity, uint32_t> computedProbabilities{};
-        for (const Booster& booster : boosters)
-        {
-            computedProbabilities[booster[3].rarity]++;
-        }
-    }
+    std::cout << std::endl << "First three cards:" << std::endl;
+    print(computedProbabilities.at(CardNumber::OneToThird));
 
-    {
-        std::map<Rarity, uint32_t> computedProbabilities{};
-        for (const Booster& booster : boosters)
-        {
-            computedProbabilities[booster[4].rarity]++;
-        }
-    }
+    std::cout << std::endl << "Fourth card:" << std::endl;
+    print(computedProbabilities.at(CardNumber::Fourth));
+
+    std::cout << std::endl << "Fifth card:" << std::endl;
+    print(computedProbabilities.at(CardNumber::Fifth));
 #endif
 
     return 0;
